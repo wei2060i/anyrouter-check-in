@@ -6,7 +6,6 @@ on:
 
 jobs:
   checkin:
-    # 改为更稳定的运行器
     runs-on: windows-latest
     environment: Production
     env:
@@ -19,31 +18,28 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: 安装 uv
-      run: |
-        curl -LsSf https://astral.sh/uv/install.ps1 | pwsh -ExecutionPolicy Bypass -Command "Invoke-Expression -"
-
     - name: 缓存依赖
       uses: actions/cache@v4
       id: cache-deps
       with:
         path: |
-          ~/.cache/uv
+          ~\AppData\Local\pip\Cache
           .venv
-        key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml', 'requirements.txt', 'setup.py') }}
         restore-keys: |
-          ${{ runner.os }}-uv-
+          ${{ runner.os }}-pip-
 
     - name: 安装依赖
       if: steps.cache-deps.outputs.cache-hit != 'true'
       run: |
-        uv sync
-        echo "✅ 依赖安装完成"
+        echo "缓存未命中，开始安装项目依赖..."
+        pip install -r requirements.txt
+        pip install playwright
+        echo "✅ 环境初始化完成"
 
-    - name: 检查依赖
+    - name: 安装 Playwright 浏览器
       run: |
-        uv run python -c "import playwright; print('Playwright 安装成功')"
-        uv run python -c "import checkin; print('签到脚本可导入')"
+        python -m playwright install chromium
 
     - name: 执行签到
       env:
@@ -65,7 +61,7 @@ jobs:
         GOTIFY_TOKEN: ${{ secrets.GOTIFY_TOKEN }}
         GOTIFY_PRIORITY: ${{ secrets.GOTIFY_PRIORITY }}
       run: |
-        uv run checkin.py
+        python checkin.py
 
     - name: 结果通知
       if: always()
