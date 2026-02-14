@@ -6,37 +6,24 @@ on:
 
 jobs:
   checkin:
-    runs-on: windows-latest
+    runs-on: windows-2025
     environment: Production
     env:
       PYTHONIOENCODING: utf-8
     steps:
     - uses: actions/checkout@v4
 
-    - name: 设置 Python 环境
-      uses: actions/setup-python@v5
+    - uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: 安装 uv (使用备用方法)
-      run: |
-        # 方法1: 从 GitHub Releases 下载
-        $uv_version = "0.5.8"  # 请检查最新版本
-        $uv_url = "https://github.com/astral-sh/uv/releases/download/$uv_version/uv-x86_64-pc-windows-msvc.zip"
-        Invoke-WebRequest -Uri $uv_url -OutFile "uv.zip"
-        Expand-Archive -Path "uv.zip" -DestinationPath "."
-        Move-Item -Path "uv.exe" -Destination "$env:USERPROFILE\.cargo\bin\uv.exe"
-        # 或者方法2: 使用 pip 安装 uv
-        # pip install uv
-        echo "✅ uv 安装完成"
-
-    - name: 添加 uv 到 PATH
-      run: |
-        echo "$env:USERPROFILE\.cargo\bin" >> $env:GITHUB_PATH
-
-    - name: 缓存依赖
+    - name: 缓存 UV 依赖
       uses: actions/cache@v4
-      id: cache-deps
+      id: uv-cache
       with:
         path: |
           ~/.cache/uv
@@ -46,19 +33,41 @@ jobs:
           ${{ runner.os }}-uv-
 
     - name: 安装依赖
-      if: steps.cache-deps.outputs.cache-hit != 'true'
+      if: steps.uv-cache.outputs.cache-hit != 'true'
       run: |
+        echo "缓存未命中，开始安装项目依赖..."
         uv sync
-        echo "✅ 依赖安装完成"
+        echo "✅ 环境初始化完成"
 
-    - name: 检查依赖
+    - name: 获取 Playwright 版本
+      id: playwright-version
       run: |
-        uv run python -c "import playwright; print('Playwright 安装成功')"
-        uv run python -c "import checkin; print('签到脚本可导入')"
+        $version = uv run python -c "import importlib.metadata; print(importlib.metadata.version('playwright'))"
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        echo "Playwright version: $version"
+
+    - name: 缓存 Playwright 浏览器
+      uses: actions/cache@v4
+      id: playwright-cache
+      with:
+        path: ~\AppData\Local\ms-playwright
+        key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+        restore-keys: |
+          ${{ runner.os }}-playwright-
 
     - name: 安装 Playwright 浏览器
+      if: steps.playwright-cache.outputs.cache-hit != 'true'
       run: |
-        uv run playwright install chromium
+        echo "缓存未命中，开始安装 Playwright 浏览器..."
+        uv run playwright install chromium --with-deps
+
+    - name: 恢复余额历史缓存
+      uses: actions/cache@v4
+      with:
+        path: balance_hash.txt
+        key: balance-hash-${{ github.sha }}
+        restore-keys: |
+          balance-hash-
 
     - name: 执行签到
       env:
@@ -82,14 +91,8 @@ jobs:
       run: |
         uv run checkin.py
 
-    - name: 结果通知
+    - name: 执行结果
       if: always()
       run: |
-        echo "✅ 签到任务执行完成"
+        echo "签到任务执行完成"
         echo "时间: $(Get-Date)"
-        if ($LASTEXITCODE -eq 0) {
-          echo "任务成功"
-        } else {
-          echo "任务失败，退出码: $LASTEXITCODE"
-          exit 1
-        }
